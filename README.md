@@ -59,6 +59,13 @@ python run_games.py --concurrency 16 --stockfish_exe ./stockfish.master --c_ches
 Automatically converts all `.ckpt` found under `run96` to `.nnue` and runs games to find the best net. Games are played using `c-chess-cli` and nets are ranked using `ordo`.
 This script runs in a loop, and will monitor the directory for new checkpoints. Can be run in parallel with the training, if idle cores are available.
 
+## Further Reading
+
+For an overview of JEPA and its application to chess, see [docs/jepa.md](docs/jepa.md). The original papers are available in [docs/papers](docs/papers).
+The training script also exposes `--jepa-weight` and `--jepa-mask-mode` to
+control the JEPA loss and masking strategy during training.
+For details on the data loader pipeline see [docs/data_loader.md](docs/data_loader.md).
+
 
 ## Thanks
 

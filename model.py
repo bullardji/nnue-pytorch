@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import pytorch_lightning as pl
 from feature_transformer import DoubleFeatureTransformerSlice
+from jepa_module import JepaWorldModel
 
 # 3 layer fully connected network
 L1 = 3072
@@ -160,6 +161,8 @@ class NNUE(pl.LightningModule):
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
+        jepa_weight=0.0,
+        jepa_mask_mode="random",
     ):
         super(NNUE, self).__init__()
         self.num_psqt_buckets = num_psqt_buckets
@@ -177,6 +180,13 @@ class NNUE(pl.LightningModule):
         self.gamma = gamma
         self.lr = lr
         self.param_index = param_index
+        self.jepa_weight = jepa_weight
+        self.jepa_mask_mode = jepa_mask_mode
+        self.jepa_model = (
+            JepaWorldModel(L1, mask_mode=jepa_mask_mode, feature_set=feature_set)
+            if jepa_weight > 0
+            else None
+        )
 
         self.nnue2score = 600.0
         self.weight_scale_hidden = 64.0
@@ -338,6 +348,7 @@ class NNUE(pl.LightningModule):
         black_values,
         psqt_indices,
         layer_stack_indices,
+        return_latent: bool = False,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, L1, dim=1)
@@ -359,6 +370,8 @@ class NNUE(pl.LightningModule):
         # which does both the averaging and sign flip for black to move)
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
+        if return_latent:
+            return x, l0_
         return x
 
     def step_(self, batch, batch_idx, loss_type):
@@ -386,8 +399,8 @@ class NNUE(pl.LightningModule):
         out_scaling = 380
         offset = 270
 
-        scorenet = (
-            self(
+        if self.jepa_weight > 0.0:
+            scorenet, latent = self(
                 us,
                 them,
                 white_indices,
@@ -396,9 +409,40 @@ class NNUE(pl.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
+                return_latent=True,
             )
-            * self.nnue2score
-        )
+            scorenet = scorenet * self.nnue2score
+            _, teacher_latent_raw = self(
+                them,
+                us,
+                white_indices,
+                white_values,
+                black_indices,
+                black_values,
+                psqt_indices,
+                layer_stack_indices,
+                return_latent=True,
+            )
+            student_latent = self.jepa_model.student_encoder(latent)
+            with torch.no_grad():
+                teacher_latent = self.jepa_model.teacher_encoder(teacher_latent_raw)
+            j_loss = self.jepa_model.compute_loss(
+                student_latent, teacher_latent, mask_mode=self.jepa_mask_mode
+            )
+        else:
+            scorenet = (
+                self(
+                    us,
+                    them,
+                    white_indices,
+                    white_values,
+                    black_indices,
+                    black_values,
+                    psqt_indices,
+                    layer_stack_indices,
+                )
+                * self.nnue2score
+            )
         q = (scorenet - offset) / in_scaling  # used to compute the chance of a win
         qm = (-scorenet - offset) / in_scaling  # used to compute the chance of a loss
         qf = 0.5 * (
@@ -419,6 +463,11 @@ class NNUE(pl.LightningModule):
         if self.qp_asymmetry != 0.0:
             loss = loss * ((qf > pt) * self.qp_asymmetry + 1)
         loss = loss.mean()
+
+        if self.jepa_weight > 0.0:
+            loss = loss + self.jepa_weight * j_loss
+            self.log("jepa_loss", j_loss)
+            self.jepa_model.update_teacher(self.jepa_model.student_encoder)
 
         self.log(loss_type, loss)
 
@@ -446,6 +495,8 @@ class NNUE(pl.LightningModule):
             {"params": [self.layer_stacks.output.weight], "lr": LR},
             {"params": [self.layer_stacks.output.bias], "lr": LR},
         ]
+        if self.jepa_weight > 0.0:
+            train_params.append({"params": self.jepa_model.parameters(), "lr": LR})
 
         optimizer = ranger21.Ranger21(
             train_params,

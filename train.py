@@ -1,3 +1,10 @@
+"""Training script for NNUE networks.
+
+Example:
+    python train.py data/*.binpack \\
+        --jepa-weight 0.1 --jepa-mask-mode board_group
+"""
+
 import argparse
 import model as M
 import nnue_dataset
@@ -311,6 +318,21 @@ def main():
         dest="simple_eval_skipping",
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
+    parser.add_argument(
+        "--jepa-weight",
+        type=float,
+        default=0.0,
+        dest="jepa_weight",
+        help="Weight of JEPA reconstruction loss (0 to disable).",
+    )
+    parser.add_argument(
+        "--jepa-mask-mode",
+        type=str,
+        default="random",
+        dest="jepa_mask_mode",
+        choices=["random", "board_group"],
+        help="Masking strategy for JEPA latent features.",
+    )
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -359,6 +381,8 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
+            jepa_weight=args.jepa_weight,
+            jepa_mask_mode=args.jepa_mask_mode,
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
@@ -373,6 +397,8 @@ def main():
         nnue.gamma = args.gamma
         nnue.lr = args.lr
         nnue.param_index = args.param_index
+        nnue.jepa_weight = args.jepa_weight
+        nnue.jepa_mask_mode = args.jepa_mask_mode
 
     print("Feature set: {}".format(feature_set.name))
     print("Num real features: {}".format(feature_set.num_real_features))
@@ -391,6 +417,8 @@ def main():
     print("Skip early plies: {}".format(args.early_fen_skipping))
     print("Skip simple eval : {}".format(args.simple_eval_skipping))
     print("Param index: {}".format(args.param_index))
+    print("JEPA weight: {}".format(args.jepa_weight))
+    print("JEPA mask mode: {}".format(args.jepa_mask_mode))
 
     if args.threads > 0:
         print("limiting torch to {} threads.".format(args.threads))
