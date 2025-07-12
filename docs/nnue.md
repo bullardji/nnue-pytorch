@@ -15,6 +15,10 @@ What this document DOES contain:
 - pytorch trainer implementation (+ important CUDA kernels)
 - architectural considerations and history
 
+A shorter explanation of the Python data loader pipeline, including
+`FixedNumBatchesDataset`, can be found in
+[data_loader.md](data_loader.md).
+
 What this document DOES NOT contain:
 
 - a tutorial for training networks (for that see [the wiki](https://github.com/glinscott/nnue-pytorch/wiki))
